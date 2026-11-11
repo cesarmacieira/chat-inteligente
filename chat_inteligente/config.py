@@ -21,7 +21,7 @@ CATALOG_PATH = ROOT / "chat_inteligente" / "catalog.yaml"
 # --- implantação (Streamlit Community Cloud) ---
 APP_PASSWORD = os.getenv("APP_PASSWORD", "")                  # se definida, o app pede senha
 MAX_QUESTIONS = int(os.getenv("MAX_QUESTIONS", "50"))         # perguntas por sessão (0 = sem limite); protege o custo da OpenAI
-AUTO_BOOTSTRAP = os.getenv("AUTO_BOOTSTRAP", "0") == "1"      # gera dados sintéticos + modelos se o banco não existir
+AUTO_BOOTSTRAP = os.getenv("AUTO_BOOTSTRAP", "1") == "1"      # padrão ligado: gera dados sintéticos + modelos só se o banco não existir (AUTO_BOOTSTRAP=0 desliga)
 
 # --- histórico de conversas (auditoria: pergunta, resposta e o que foi executado) ---
 HISTORY_PATH = Path(os.getenv("HISTORY_PATH", "data/chat_history.sqlite"))

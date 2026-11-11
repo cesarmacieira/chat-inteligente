@@ -1,6 +1,6 @@
 """Prepara o banco na primeira execução (ex.: Streamlit Cloud, cujo disco é efêmero).
 
-Só age com AUTO_BOOTSTRAP=1 e apenas quando o banco está ausente, vazio ou sem execução dos modelos.
+Ligado por padrão (AUTO_BOOTSTRAP=0 desliga); age apenas quando o banco está ausente, vazio ou sem execução dos modelos.
 Em ambiente local, com dados reais, nunca sobrescreve nada.
 """
 from . import config, overview, run_daily, synth
