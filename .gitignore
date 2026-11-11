@@ -1,0 +1,8 @@
+.env
+data/*.duckdb
+data/*.wal
+__pycache__/
+.venv/
+.pytest_cache/
+.streamlit/secrets.toml
+data/*.sqlite

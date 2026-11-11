@@ -1,0 +1,168 @@
+# Catálogo semântico: é o que o LLM enxerga. Para trocar de fonte de dados,
+# edite este arquivo (tabelas, colunas, exemplos) — o resto do código não muda.
+dialect: duckdb
+notes: |
+  - Use SOMENTE as tabelas listadas abaixo.
+  - Domínio: siderurgia integrada (Planta Norte e Planta Sul), com métricas de produção, segurança e meio ambiente.
+  - A área de uma métrica está em metrics_catalog.area (producao | seguranca | meio_ambiente).
+  - metrics_catalog.agregacao diz como agregar no tempo: 'soma' (toneladas, contagens, horas) ou 'media' (taxas, concentrações, intensidades). Use SUM ou AVG conforme esse campo.
+  - A entidade SEG00 (Segurança — Consolidado) já é a soma de todas as áreas de segurança. NÃO some SEG00 com outras entidades; para totais por área use e.tipo <> 'consolidado_seguranca'.
+  - Quando o usuário perguntar "qual área/setor/equipamento" teve algo (acidentes, incidentes, desvios, ocorrências), agrupe por e.name (entidade), excluindo e.tipo = 'consolidado_seguranca'. metrics_catalog.area é a categoria da métrica (producao | seguranca | meio_ambiente), NÃO o setor da usina.
+  - Taxa de acidentes por milhão de HH = SUM(acidentes) * 1e6 / SUM(horas_homem_trabalhadas).
+  - Limites ambientais ficam em metrics_catalog.limite_superior / limite_inferior; excedência é valor acima do superior ou abaixo do inferior.
+  - v_outliers traz todos os dias dos últimos 90 dias; em datas mais antigas só aparecem os dias sinalizados (ausência = não foi outlier). expected é a mediana do mesmo dia da semana nas últimas 8 semanas.
+  - Prefira v_outliers e v_trends (última execução dos modelos).
+  - Datas relativas: use (SELECT MAX(ref_date) FROM daily_metrics) como "hoje", não CURRENT_DATE.
+  - Datas escritas como dd/mm/aaaa devem virar DATE 'aaaa-mm-dd' e filtrar com d.ref_date = DATE '2026-11-05' (nunca filtrar só por dia e mês, sem o ano).
+  - Para valor de um dia específico, devolva uma linha por ativo, sem agrupar por ano.
+  - Dê apelidos legíveis em português às colunas do SELECT, entre aspas duplas (ex.: e.name AS "Alto-forno", SUM(d.value) AS "Produção (t)", d.ref_date AS "Data"); nunca devolva nomes técnicos como name, ref_date, value.
+  - Os dados são fictícios (simulação), de 2021-01-01 até a data mais recente.
+suggestions:
+  - Qual foi a produção de cada alto-forno no dia 05/11/2026?
+  - Quais métricas têm tendência de queda nos últimos 90 dias?
+  - Qual a produção anual de gusa por alto-forno?
+  - Quantos acidentes houve por área em 2025?
+  - Quais indicadores ambientais ficaram fora do limite nos últimos 90 dias?
+  - Quais foram os outliers de segurança mais recentes?
+  - Qual a taxa de acidentes por milhão de horas-homem por ano?
+  - Como evoluiu o rendimento metálico do laminador por trimestre?
+  - Quantos dias o Alto-Forno 1 ficou parado ou com produção muito baixa?
+  - Como foi o consumo de zinco da Galvanização 2 por mês em 2026?
+  - Quais séries tiveram outlier nos últimos 90 dias e têm tendência de alta ou queda?
+tables:
+  entities:
+    description: Cadastro de entidades (equipamentos, áreas, pontos de monitoramento).
+    columns:
+      entity_id: identificador
+      name: nome (ex. Alto-Forno 1, Laminador de Tiras a Quente, Linha de Galvanização 1)
+      planta: Planta Norte | Planta Sul | Todas
+      tipo: "alto_forno | aciaria | laminador | galvanizacao | utilidades | manutencao | logistica | ponto_ambiental | consolidado_ambiental | consolidado_seguranca"
+  metrics_catalog:
+    description: Catálogo das métricas, com área, unidade, regra de agregação e limites.
+    columns:
+      metric: nome da métrica (chave)
+      area: producao | seguranca | meio_ambiente
+      unidade: unidade de medida
+      descricao: descrição
+      tipo_dado: continuo | contagem
+      agregacao: "soma | media"
+      limite_superior: limite máximo (nulo se não há)
+      limite_inferior: limite mínimo (nulo se não há)
+      referencia: origem do limite ou da meta
+  daily_metrics:
+    description: Série diária por entidade e métrica (dado base).
+    columns:
+      entity_id: FK entities
+      metric: FK metrics_catalog (ex. producao_t, acidentes, ph_efluente)
+      ref_date: data
+      value: valor do dia
+  v_outliers:
+    description: Pontos sinalizados pelo modelo de outlier (histórico completo dos sinalizados + últimos 90 dias, última execução).
+    columns:
+      entity_id: FK entities
+      metric: métrica
+      ref_date: data
+      value: valor observado
+      expected: valor esperado
+      score: "z robusto (contínuas) ou z de Poisson (contagens); positivo = acima do esperado"
+      is_outlier: "true quando |score| >= 3.5"
+  v_trends:
+    description: Tendência por entidade/métrica/janela (última execução).
+    columns:
+      entity_id: FK entities
+      metric: métrica
+      window_days: janela em dias (30, 90 ou 365)
+      slope_per_day: inclinação da regressão linear (sem efeito de dia da semana)
+      pct_change: variação % estimada ao longo da janela
+      p_value: significância (corrigida por autocorrelação)
+      trend_direction: "alta | queda | estavel (alta/queda só se significativa e relevante)"
+      is_significant: "true quando a tendência é relevante"
+examples:
+  - q: A produção da galvanização no dia 19/09/2026 foi um outlier?
+    sql: |
+      SELECT e.name AS "Ativo", o.ref_date AS "Data", o.value AS "Produção observada (t)", o.expected AS "Produção esperada (t)", o.score AS "Intensidade do desvio", o.is_outlier AS "Fora do padrão"
+      FROM v_outliers o JOIN entities e USING (entity_id)
+      WHERE o.metric = 'producao_t' AND e.tipo = 'galvanizacao' AND o.ref_date = DATE '2026-09-19'
+      ORDER BY e.name
+  - q: Qual área teve mais incidentes em 2026?
+    sql: |
+      SELECT e.name AS "Área", SUM(d.value) AS "Incidentes"
+      FROM daily_metrics d JOIN entities e USING (entity_id)
+      WHERE d.metric = 'incidentes' AND e.tipo <> 'consolidado_seguranca'
+        AND EXTRACT(year FROM d.ref_date) = 2026
+      GROUP BY 1 ORDER BY 2 DESC
+  - q: Qual foi a produção de cada alto-forno no dia 05/11/2026?
+    sql: |
+      SELECT e.name AS "Alto-forno", d.ref_date AS "Data", d.value AS "Produção (t)"
+      FROM daily_metrics d JOIN entities e USING (entity_id)
+      WHERE d.metric = 'producao_t' AND e.tipo = 'alto_forno' AND d.ref_date = DATE '2026-11-05'
+      ORDER BY e.name
+  - q: Quais métricas têm tendência de queda nos últimos 90 dias?
+    sql: |
+      SELECT e.name AS "Ativo", t.metric AS "Indicador", t.pct_change AS "Variação (%)"
+      FROM v_trends t JOIN entities e USING (entity_id)
+      WHERE t.window_days = 90 AND t.trend_direction = 'queda'
+      ORDER BY t.pct_change
+  - q: Qual a produção anual de gusa por alto-forno?
+    sql: |
+      SELECT e.name AS "Alto-forno", EXTRACT(year FROM d.ref_date) AS "Ano", SUM(d.value) AS "Produção (t)"
+      FROM daily_metrics d JOIN entities e USING (entity_id)
+      WHERE d.metric = 'producao_t' AND e.tipo = 'alto_forno'
+      GROUP BY 1, 2 ORDER BY 1, 2
+  - q: Quantos acidentes houve por área em 2025?
+    sql: |
+      SELECT e.name AS "Área", SUM(d.value) AS "Acidentes"
+      FROM daily_metrics d JOIN entities e USING (entity_id)
+      WHERE d.metric = 'acidentes' AND e.tipo <> 'consolidado_seguranca'
+        AND EXTRACT(year FROM d.ref_date) = 2025
+      GROUP BY 1 ORDER BY 2 DESC
+  - q: Quais indicadores ambientais ficaram fora do limite nos últimos 90 dias?
+    sql: |
+      SELECT e.name AS "Ponto", d.metric AS "Indicador", COUNT(*) AS "Dias fora do limite", MAX(d.value) AS "Máximo", MIN(d.value) AS "Mínimo",
+             c.limite_inferior AS "Limite inferior", c.limite_superior AS "Limite superior"
+      FROM daily_metrics d JOIN entities e USING (entity_id) JOIN metrics_catalog c USING (metric)
+      WHERE c.area = 'meio_ambiente'
+        AND d.ref_date > (SELECT MAX(ref_date) FROM daily_metrics) - INTERVAL 90 DAY
+        AND ((c.limite_superior IS NOT NULL AND d.value > c.limite_superior)
+          OR (c.limite_inferior IS NOT NULL AND d.value < c.limite_inferior))
+      GROUP BY 1, 2, c.limite_inferior, c.limite_superior ORDER BY "Dias fora do limite" DESC
+  - q: Quais foram os outliers de segurança mais recentes?
+    sql: |
+      SELECT o.ref_date AS "Data", e.name AS "Área", o.metric AS "Indicador", o.value AS "Valor observado", o.expected AS "Valor esperado", o.score AS "Intensidade do desvio"
+      FROM v_outliers o JOIN entities e USING (entity_id) JOIN metrics_catalog c USING (metric)
+      WHERE o.is_outlier AND c.area = 'seguranca'
+      ORDER BY o.ref_date DESC LIMIT 15
+  - q: Qual a taxa de acidentes por milhão de horas-homem por ano?
+    sql: |
+      SELECT EXTRACT(year FROM d.ref_date) AS "Ano",
+             SUM(d.value) FILTER (WHERE d.metric = 'acidentes') * 1e6
+               / SUM(d.value) FILTER (WHERE d.metric = 'horas_homem_trabalhadas') AS "Acidentes por milhão de horas-homem"
+      FROM daily_metrics d JOIN entities e USING (entity_id)
+      WHERE e.tipo <> 'consolidado_seguranca' AND d.metric IN ('acidentes', 'horas_homem_trabalhadas')
+      GROUP BY 1 ORDER BY 1
+  - q: Como evoluiu o rendimento metálico do laminador por trimestre?
+    sql: |
+      SELECT date_trunc('quarter', d.ref_date)::DATE AS "Trimestre", AVG(d.value) AS "Rendimento metálico (%)"
+      FROM daily_metrics d JOIN entities e USING (entity_id)
+      WHERE d.metric = 'rendimento_metalico_pct' AND e.tipo = 'laminador'
+      GROUP BY 1 ORDER BY 1
+  - q: Quantos dias o Alto-Forno 1 ficou parado ou com produção muito baixa?
+    sql: |
+      SELECT COUNT(*) AS "Dias parado ou com produção muito baixa"
+      FROM daily_metrics d
+      WHERE d.entity_id = 'AF01' AND d.metric = 'producao_t'
+        AND d.value < 0.25 * (SELECT quantile_cont(value, 0.5) FROM daily_metrics
+                              WHERE entity_id = 'AF01' AND metric = 'producao_t' AND value > 0)
+  - q: Como foi o consumo de zinco da Galvanização 2 por mês em 2026?
+    sql: |
+      SELECT date_trunc('month', ref_date)::DATE AS "Mês", AVG(value) AS "Consumo de zinco (kg/t)"
+      FROM daily_metrics
+      WHERE entity_id = 'GALV02' AND metric = 'consumo_zinco_kg_t' AND EXTRACT(year FROM ref_date) = 2026
+      GROUP BY 1 ORDER BY 1
+  - q: Quais séries tiveram outlier nos últimos 90 dias e têm tendência de alta ou queda?
+    sql: |
+      SELECT DISTINCT e.name AS "Ativo", o.metric AS "Indicador", t.window_days AS "Janela (dias)", t.trend_direction AS "Tendência"
+      FROM v_outliers o JOIN entities e USING (entity_id)
+      JOIN v_trends t ON t.entity_id = o.entity_id AND t.metric = o.metric
+      WHERE o.is_outlier AND t.trend_direction IN ('alta', 'queda')
+        AND o.ref_date > (SELECT MAX(ref_date) FROM daily_metrics) - INTERVAL 90 DAY

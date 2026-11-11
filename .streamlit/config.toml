@@ -1,0 +1,14 @@
+[theme]
+base = "light"
+primaryColor = "#1f5f8b"
+backgroundColor = "#ffffff"
+secondaryBackgroundColor = "#f7f7f8"
+textColor = "#1f2328"
+font = "sans serif"
+
+[server]
+# recarrega o app quando o código do pacote mudar (sem precisar reiniciar o streamlit)
+folderWatchList = ["chat_inteligente"]
+
+[browser]
+gatherUsageStats = false
