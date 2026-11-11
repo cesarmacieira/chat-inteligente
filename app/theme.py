@@ -111,3 +111,26 @@ def header(title_html: str, pill: str = "") -> None:
 
 def view_title(title: str, subtitle: str = "") -> None:
     st.markdown(f'<div class="view-title">{title}</div><p class="view-sub">{subtitle}</p>', unsafe_allow_html=True)
+
+
+LOGIN_CSS = """
+<style>
+section[data-testid="stSidebar"],[data-testid="stSidebarCollapsedControl"],[data-testid="stExpandSidebarButton"]{display:none!important}
+html,body,[data-testid="stApp"],[data-testid="stAppViewContainer"]{
+  background:radial-gradient(900px 500px at 50% -10%,#e8f0f7 0%,#fff 62%)!important}
+.block-container{max-width:420px!important;padding-top:11vh!important}
+.login-hero{display:flex;flex-direction:column;align-items:center;text-align:center;margin-bottom:18px}
+.login-hero h1{font-size:1.7rem;margin:16px 0 6px;letter-spacing:-.03em}
+.login-hero p{color:var(--muted);margin:0;font-size:.92rem;line-height:1.55}
+[data-testid="stForm"]{background:#fff;border:1px solid var(--line)!important;border-radius:18px;padding:22px 22px 18px;
+  box-shadow:0 14px 40px rgba(16,24,40,.08)}
+[data-testid="stForm"] input{border-radius:12px}
+[data-testid="stForm"] .stButton button{border-radius:12px;font-weight:650;background:var(--accent);border-color:var(--accent);height:2.7rem}
+[data-testid="stForm"] .stButton button:hover{background:var(--accent-dark);border-color:var(--accent-dark)}
+.login-foot{text-align:center;font-size:.74rem;color:var(--muted);margin-top:16px}
+</style>
+"""
+
+
+def login_css() -> None:
+    st.markdown(LOGIN_CSS, unsafe_allow_html=True)

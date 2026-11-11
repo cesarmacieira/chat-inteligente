@@ -135,7 +135,11 @@ class Agent:
             return Answer(sql, None, "Não consegui montar uma consulta válida para essa pergunta. "
                           "Tente reformular, citando o ativo, o indicador e o período.", err, attempts=attempts)
         if df.empty:
-            return Answer(sql, df, "A consulta rodou, mas não retornou nenhuma linha para esse filtro.", attempts=attempts)
+            msg = "A consulta rodou, mas não retornou nenhuma linha para esse filtro."
+            if "v_outliers" in sql.lower():
+                msg += (" Os modelos só registram os dias fora do padrão; se o filtro era um dia específico, "
+                        "isso indica que ele não foi sinalizado como outlier. Tente perguntar pelo valor do dia.")
+            return Answer(sql, df, msg, attempts=attempts)
         ctx = context.build(sql, df)
         att = context.build(sql, df, friendly=True)
         cols = ", ".join(f"{c} ({t})" for c, t in zip(df.columns, df.dtypes.astype(str)))

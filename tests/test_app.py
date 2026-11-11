@@ -144,10 +144,12 @@ def test_password_gate_and_question_limit(monkeypatch):
     from chat_inteligente import config
     monkeypatch.setattr(config, "APP_PASSWORD", "segredo")
     at = AppTest.from_file(APP, default_timeout=120).run()
-    assert not at.exception and len(at.button) == 0 and len(at.chat_input) == 0   # bloqueado
-    at.text_input(key="pwd").input("errada").run()
-    assert at.error and len(at.chat_input) == 0
-    at.text_input(key="pwd").input("segredo").run()
+    assert not at.exception and len(at.chat_input) == 0 and len(at.sidebar.button) == 0   # bloqueado
+    at.text_input(key="pwd").input("errada")
+    at.button[0].click().run()
+    assert any("incorreta" in e.value for e in at.error) and len(at.chat_input) == 0
+    at.text_input(key="pwd").input("segredo")
+    at.button[0].click().run()
     assert not at.exception and len(at.chat_input) == 1
 
     _fake_llm(monkeypatch, "SELECT COUNT(*) c FROM entities")
@@ -183,3 +185,13 @@ def test_history_view_and_resume(monkeypatch):
     rec[0].click().run()
     assert not at2.exception, at2.exception
     assert len(at2.chat_message) >= 1 and len(history.all_turns(1000)) == n   # só leitura, não regrava
+
+
+def test_outlier_question_on_normal_day_returns_row():
+    con = connect(read_only=True)
+    try:
+        sql = [e["sql"] for e in load_catalog()["examples"] if "foi um outlier" in e["q"]][0]
+        df = con.execute(sql.replace("2026-09-19", "2025-12-28")).df()   # dia comum, fora da janela de 90 dias
+        assert len(df) >= 1 and not df["Fora do padrão"].any()
+    finally:
+        con.close()

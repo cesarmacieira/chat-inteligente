@@ -19,13 +19,20 @@ st.set_page_config(page_title="Chat inteligente", page_icon="✦", layout="wide"
 theme.apply()
 
 if config.APP_PASSWORD and not st.session_state.get("auth"):
-    theme.header('Chat <span>inteligente</span>')
-    pwd = st.text_input("Senha de acesso", type="password", key="pwd")
-    if pwd:
+    theme.login_css()
+    st.markdown('<div class="login-hero"><div class="welcome-mark">✦</div><h1>Chat inteligente</h1>'
+                '<p>Produção, segurança e meio ambiente em linguagem simples.<br>Acesso restrito: informe a senha para entrar.</p></div>',
+                unsafe_allow_html=True)
+    with st.form("login", border=False):
+        pwd = st.text_input("Senha de acesso", type="password", key="pwd", placeholder="Digite a senha")
+        entrar = st.form_submit_button("Entrar", type="primary", width="stretch")
+    if entrar or pwd:
         if hmac.compare_digest(pwd.encode(), config.APP_PASSWORD.encode()):
             st.session_state.auth = True
             st.rerun()
-        st.error("Senha incorreta.")
+        elif entrar:
+            st.error("Senha incorreta. Tente novamente.")
+    st.markdown('<div class="login-foot">Dados fictícios de demonstração · acesso monitorado</div>', unsafe_allow_html=True)
     st.stop()
 
 

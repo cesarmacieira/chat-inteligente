@@ -11,6 +11,7 @@ notes: |
   - Taxa de acidentes por milhão de HH = SUM(acidentes) * 1e6 / SUM(horas_homem_trabalhadas).
   - Limites ambientais ficam em metrics_catalog.limite_superior / limite_inferior; excedência é valor acima do superior ou abaixo do inferior.
   - v_outliers traz todos os dias dos últimos 90 dias; em datas mais antigas só aparecem os dias sinalizados (ausência = não foi outlier). expected é a mediana do mesmo dia da semana nas últimas 8 semanas.
+  - Para perguntas do tipo "o dia X foi outlier?" parta de daily_metrics e use LEFT JOIN em v_outliers (mesmo entity_id, metric e ref_date) com COALESCE(o.is_outlier, false); assim dias normais antigos, que não existem em v_outliers, voltam com "Fora do padrão" = false em vez de resultado vazio. Perguntas curtas de acompanhamento ("foi um outlier?") usam o ativo, o indicador e a data da pergunta anterior.
   - Prefira v_outliers e v_trends (última execução dos modelos).
   - Datas relativas: use (SELECT MAX(ref_date) FROM daily_metrics) como "hoje", não CURRENT_DATE.
   - Datas escritas como dd/mm/aaaa devem virar DATE 'aaaa-mm-dd' e filtrar com d.ref_date = DATE '2026-11-05' (nunca filtrar só por dia e mês, sem o ano).
@@ -80,9 +81,12 @@ tables:
 examples:
   - q: A produção da galvanização no dia 19/09/2026 foi um outlier?
     sql: |
-      SELECT e.name AS "Ativo", o.ref_date AS "Data", o.value AS "Produção observada (t)", o.expected AS "Produção esperada (t)", o.score AS "Intensidade do desvio", o.is_outlier AS "Fora do padrão"
-      FROM v_outliers o JOIN entities e USING (entity_id)
-      WHERE o.metric = 'producao_t' AND e.tipo = 'galvanizacao' AND o.ref_date = DATE '2026-09-19'
+      SELECT e.name AS "Ativo", d.ref_date AS "Data", d.value AS "Produção (t)",
+             o.expected AS "Produção esperada (t)", o.score AS "Intensidade do desvio",
+             COALESCE(o.is_outlier, false) AS "Fora do padrão"
+      FROM daily_metrics d JOIN entities e USING (entity_id)
+      LEFT JOIN v_outliers o ON o.entity_id = d.entity_id AND o.metric = d.metric AND o.ref_date = d.ref_date
+      WHERE d.metric = 'producao_t' AND e.tipo = 'galvanizacao' AND d.ref_date = DATE '2026-09-19'
       ORDER BY e.name
   - q: Qual área teve mais incidentes em 2026?
     sql: |
