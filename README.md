@@ -2,6 +2,8 @@
 
 Aplicação interna em Streamlit para consultar indicadores fictícios de produção, segurança e meio ambiente em linguagem natural. O LLM gera uma consulta, o backend valida o SQL e executa somente leitura no DuckDB; uma segunda chamada produz o resumo executivo.
 
+Documentação da demo: [docs/chat-inteligente-cast.md](docs/chat-inteligente-cast.md).
+
 ## Requisitos
 
 - Python 3.12
