@@ -72,6 +72,17 @@ def test_chat_input_flow_shows_context_and_sql(monkeypatch):
     assert t["status"] == "ok" and "producao_t" in t["sql_final"] and t["rows"] > 0 and t["answer"]
 
 
+def test_out_of_scope_question_has_no_technical_details(monkeypatch):
+    _fake_llm(monkeypatch, "FORA_DO_ESCOPO")
+    from streamlit.testing.v1 import AppTest
+    at = AppTest.from_file(APP, default_timeout=120).run()
+    at.chat_input[0].set_value("Quem descobriu o Brasil?").run()
+    assert not at.exception, at.exception
+    assert any("Posso ajudar com perguntas sobre produção" in m.value for m in at.markdown)
+    assert not any("Como chegamos" in e.label for e in at.expander)
+    assert not any("Não consegui montar uma consulta" in m.value for m in at.markdown)
+
+
 def test_navigation_views_render(monkeypatch):
     from streamlit.testing.v1 import AppTest
     at = AppTest.from_file(APP, default_timeout=120).run()

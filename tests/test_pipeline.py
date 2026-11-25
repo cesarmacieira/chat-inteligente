@@ -241,6 +241,18 @@ def test_prompt_injection_is_rejected_before_llm():
     assert a.error == "entrada_recusada" and a.df is None and not a.sql
 
 
+def test_out_of_scope_answer_is_short_and_does_not_retry():
+    class LLM:
+        def __init__(self): self.calls = 0
+        def chat(self, m):
+            self.calls += 1
+            return "Desculpe, mas só posso responder a perguntas relacionadas à produção, segurança ou meio ambiente."
+    llm = LLM()
+    a = Agent(llm=llm).ask("Quem descobriu o Brasil?")
+    assert a.text == "Posso ajudar com perguntas sobre produção, segurança e meio ambiente."
+    assert a.error == "fora_do_escopo" and not a.sql and not a.attempts and llm.calls == 1
+
+
 def test_normal_business_question_passes_prompt_guard():
     from chat_inteligente.prompt_guard import inspect_question
     assert inspect_question("Quais indicadores ambientais ficaram fora do limite nos últimos 30 dias?") is None

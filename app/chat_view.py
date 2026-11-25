@@ -32,7 +32,7 @@ def history_for_llm(msgs: list[dict], n_turns: int = 3) -> list[dict]:
     for i, m in enumerate(msgs):
         if m["role"] == "user":
             nxt = msgs[i + 1] if i + 1 < len(msgs) and msgs[i + 1]["role"] == "assistant" else {}
-            if nxt.get("error") == "entrada_recusada" or inspect_question(m["text"]):
+            if nxt.get("error") in {"entrada_recusada", "fora_do_escopo"} or inspect_question(m["text"]):
                 continue
             pairs.append(m)
         elif m.get("sql") and m.get("error") != "entrada_recusada":
@@ -211,7 +211,8 @@ def _assistant(m: dict, key: str, latest: bool = False) -> None:
         if m.get("turn_id"):
             fk = f"fb_{key}"
             st.feedback("thumbs", key=fk, on_change=_on_feedback, args=(fk, m["turn_id"]))
-        if config.SHOW_TECHNICAL and (m.get("sql") or m.get("error")):
+        expected_refusal = m.get("error") in {"entrada_recusada", "fora_do_escopo"}
+        if config.SHOW_TECHNICAL and not expected_refusal and (m.get("sql") or m.get("error")):
             with st.expander("Como chegamos a esse resultado"):
                 technical_details(m.get("sql"), m.get("attempts"), m.get("secs"), m.get("provider", config.LLM_PROVIDER),
                                   m.get("model", ""), m.get("error"))
