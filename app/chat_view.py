@@ -240,16 +240,20 @@ def _briefing_cached(run_ts: str) -> dict:
     return briefing.build()
 
 
-def _briefing(info: dict) -> None:
+def _briefing_text(info: dict) -> str:
+    """Resumo determinístico, usado somente quando o usuário pedir."""
     if not info.get("has_run"):
-        return
+        return "Os modelos ainda não foram executados; não há resumo do dia disponível."
     b = _briefing_cached(str(info.get("run_ts")))
     if not b["items"]:
-        return
-    rows = "".join(f'<li><span class="tag tag-{k}">{html.escape(briefing.TAGS[k])}</span> {html.escape(t)}</li>'
-                   for k, t in b["items"])
-    st.markdown(f'<div class="briefing"><div class="briefing-title">Resumo do dia · dados até {b["date"]}</div>'
-                f"<ul>{rows}</ul></div>", unsafe_allow_html=True)
+        return "Não há pontos relevantes para destacar no resumo do dia."
+    rows = "\n".join(f"- **{briefing.TAGS[k]}:** {text}" for k, text in b["items"])
+    return f"Resumo do dia, com dados até {b['date']}:\n\n{rows}"
+
+
+def _is_briefing_request(question: str) -> bool:
+    q = " ".join(question.lower().strip().split())
+    return q in {"resumo do dia", "mostre o resumo do dia", "mostrar resumo do dia", "briefing do dia"}
 
 
 def render(info: dict, cat: dict) -> None:
@@ -265,9 +269,10 @@ def render(info: dict, cat: dict) -> None:
                     '<p>Pergunte em português sobre produção, segurança e meio ambiente. '
                     'Eu busco os dados, resumo o resultado e destaco o que merece atenção.</p></div>',
                     unsafe_allow_html=True)
-        _briefing(info)
         with st.container(key="suggestions"):
             cols = st.columns(2)
+            cols[0].button("Mostre o resumo do dia", key="daily_briefing", on_click=_set_pending,
+                           args=("Mostre o resumo do dia",), width="stretch")
             for i, q in enumerate(cat.get("suggestions", [])[:8]):
                 cols[i % 2].button(q, key=f"sug{i}", on_click=_set_pending, args=(q,), width="stretch")
     last_assistant = max((i for i, m in enumerate(ss.msgs) if m["role"] == "assistant"), default=-1)
@@ -284,12 +289,18 @@ def render(info: dict, cat: dict) -> None:
     with st.chat_message("assistant", avatar=AVATAR):
         with st.spinner("Consultando os dados..."):
             try:
-                a = ss.agent.ask(question, hist)
-                msg = {"role": "assistant", "text": a.text, "df": a.df, "sql": a.sql, "context": a.context,
-                       "attention": a.attention, "attempts": a.attempts, "secs": time.time() - t0, "error": a.error,
-                       "unverified": a.unverified,
-                       "provider": config.LLM_PROVIDER, "model": model}
-                status = "erro" if a.error else "ok"
+                if _is_briefing_request(question):
+                    msg = {"role": "assistant", "text": _briefing_text(info), "df": None, "sql": None,
+                           "context": [], "attention": [], "attempts": [], "secs": time.time() - t0,
+                           "error": None, "unverified": [], "provider": "local", "model": "resumo determinístico"}
+                    status = "ok"
+                else:
+                    a = ss.agent.ask(question, hist)
+                    msg = {"role": "assistant", "text": a.text, "df": a.df, "sql": a.sql, "context": a.context,
+                           "attention": a.attention, "attempts": a.attempts, "secs": time.time() - t0, "error": a.error,
+                           "unverified": a.unverified,
+                           "provider": config.LLM_PROVIDER, "model": model}
+                    status = "erro" if a.error else "ok"
             except Exception as e:  # falha de rede, limite do provedor etc.
                 msg = {"role": "assistant", "df": None, "sql": None, "context": [], "attention": [], "attempts": [],
                        "secs": time.time() - t0, "error": str(e), "provider": config.LLM_PROVIDER, "model": model,

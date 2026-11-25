@@ -239,16 +239,17 @@ def test_history_feedback_and_migration(tmp_path):
         config.HISTORY_PATH = old
 
 
-def test_welcome_shows_daily_briefing_and_answer_has_feedback(monkeypatch):
+def test_daily_briefing_only_appears_after_user_asks(monkeypatch):
     from streamlit.testing.v1 import AppTest
     _fake_llm(monkeypatch)
     at = AppTest.from_file(APP, default_timeout=120).run()
     assert not at.exception, at.exception
-    assert any("Resumo do dia" in m.value for m in at.markdown)
-    at.chat_input[0].set_value("quantas entidades por planta?").run()
+    assert not any("Resumo do dia, com dados" in m.value for m in at.markdown)
+    assert at.button(key="daily_briefing")
+    at.button(key="daily_briefing").click().run()
     assert not at.exception, at.exception
-    assert not any("Resumo do dia" in m.value for m in at.markdown)     # some quando a conversa começa
-    assert any("Continuar a análise" in c.value for c in at.caption)
+    assert any("Resumo do dia, com dados" in m.value for m in at.markdown)
+    assert len(at.chat_message) == 1
 
 
 def test_analises_has_forecast_tab_and_detail_chart(monkeypatch):
