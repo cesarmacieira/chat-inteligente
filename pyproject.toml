@@ -1,0 +1,22 @@
+[build-system]
+requires = ["setuptools>=69"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "chat-inteligente-cast"
+version = "0.1.0"
+description = "Chat executivo sobre indicadores de produção, segurança e meio ambiente."
+requires-python = ">=3.12"
+dynamic = ["dependencies"]
+
+[tool.setuptools.dynamic]
+dependencies = {file = ["requirements.txt"]}
+
+[tool.setuptools.packages.find]
+include = ["chat_inteligente*"]
+
+[tool.setuptools.package-data]
+chat_inteligente = ["catalog.yaml"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]

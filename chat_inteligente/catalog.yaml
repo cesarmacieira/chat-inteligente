@@ -17,8 +17,11 @@ notes: |
   - Datas escritas como dd/mm/aaaa devem virar DATE 'aaaa-mm-dd' e filtrar com d.ref_date = DATE '2026-11-05' (nunca filtrar só por dia e mês, sem o ano).
   - Para valor de um dia específico, devolva uma linha por ativo, sem agrupar por ano.
   - Dê apelidos legíveis em português às colunas do SELECT, entre aspas duplas (ex.: e.name AS "Alto-forno", SUM(d.value) AS "Produção (t)", d.ref_date AS "Data"); nunca devolva nomes técnicos como name, ref_date, value.
+  - Previsão: v_forecasts traz os próximos 14 dias por série (yhat = previsão; yhat_lower/yhat_upper = faixa provável de 80%; horizon_days = dias à frente; wape_pct = erro histórico do modelo em % e coverage_pct = acerto da faixa). Para "próximos N dias" filtre f.horizon_days <= N. Nunca invente previsão a partir de daily_metrics.
+  - Sinônimos de ativos: "AF1", "AF-1" e "alto forno 1" são o Alto-Forno 1 (entity_id AF01); o mesmo vale para AF02, GALV01/GALV02 (galvanização 1/2) e "laminador". Prefira filtrar por e.entity_id quando o ativo for citado.
   - Os dados são fictícios (simulação), de 2021-01-01 até a data mais recente.
 suggestions:
+  - Qual a previsão de produção do Alto-Forno 1 para os próximos 7 dias?
   - Qual foi a produção de cada alto-forno no dia 05/11/2026?
   - Quais métricas têm tendência de queda nos últimos 90 dias?
   - Qual a produção anual de gusa por alto-forno?
@@ -31,6 +34,18 @@ suggestions:
   - Como foi o consumo de zinco da Galvanização 2 por mês em 2026?
   - Quais séries tiveram outlier nos últimos 90 dias e têm tendência de alta ou queda?
 tables:
+  v_forecasts:
+    description: Previsão dos próximos 14 dias por série (última execução dos modelos), com faixa provável e erro histórico.
+    columns:
+      entity_id: identificador da entidade
+      metric: nome da métrica
+      ref_date: data prevista (sempre posterior ao último dado real)
+      horizon_days: dias à frente (1 a 14)
+      yhat: valor previsto
+      yhat_lower: limite inferior da faixa provável (80%)
+      yhat_upper: limite superior da faixa provável (80%)
+      wape_pct: erro percentual absoluto total do modelo no backtest dos últimos 14 dias (menor é melhor)
+      coverage_pct: percentual dos dias do backtest que caíram dentro da faixa
   entities:
     description: Cadastro de entidades (equipamentos, áreas, pontos de monitoramento).
     columns:
@@ -79,6 +94,13 @@ tables:
       trend_direction: "alta | queda | estavel (alta/queda só se significativa e relevante)"
       is_significant: "true quando a tendência é relevante"
 examples:
+  - q: Qual a previsão de produção do Alto-Forno 1 para os próximos 7 dias?
+    sql: |
+      SELECT e.name AS "Alto-forno", f.ref_date AS "Data", f.yhat AS "Produção prevista (t)",
+             f.yhat_lower AS "Mínimo provável (t)", f.yhat_upper AS "Máximo provável (t)"
+      FROM v_forecasts f JOIN entities e USING (entity_id)
+      WHERE f.metric = 'producao_t' AND f.entity_id = 'AF01' AND f.horizon_days <= 7
+      ORDER BY f.ref_date
   - q: A produção da galvanização no dia 19/09/2026 foi um outlier?
     sql: |
       SELECT e.name AS "Ativo", d.ref_date AS "Data", d.value AS "Produção (t)",

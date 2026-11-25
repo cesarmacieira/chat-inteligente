@@ -42,8 +42,10 @@ COLUMN_LABELS = {
     "mes": "Mês", "trimestre": "Trimestre", "semana": "Semana", "total": "Total", "media": "Média",
     "expected": "Valor esperado", "esperado": "Valor esperado", "desvio": "Desvio", "score": "Intensidade",
     "direction": "Direção", "direcao": "Direção", "tendencia": "Tendência", "variacao_pct": "Variação (%)",
-    "window_days": "Janela (dias)", "janela": "Janela (dias)", "slope": "Inclinação", "p_value": "Confiança",
+    "window_days": "Janela (dias)", "janela": "Janela (dias)", "slope": "Inclinação", "p_value": "p-valor",
     "is_outlier": "Fora do padrão", "limite_superior": "Limite superior", "limite_inferior": "Limite inferior",
+    "yhat": "Previsão", "yhat_lower": "Previsão mínima", "yhat_upper": "Previsão máxima",
+    "horizon_days": "Dias à frente", "wape_pct": "Erro histórico do modelo (%)", "coverage_pct": "Acerto da faixa (%)",
     "qtd": "Quantidade", "quantidade": "Quantidade", "linhas": "Linhas",
 }
 _SUFFIX = [("_pct", " (%)"), ("_t", " (t)"), ("_kg_t", " (kg/t)"), ("_gj_t", " (GJ/t)")]
@@ -86,7 +88,7 @@ def pretty_df(df: pd.DataFrame) -> pd.DataFrame:
         low = str(c).lower()
         if pd.api.types.is_datetime64_any_dtype(s):
             out[c] = s.dt.strftime("%d/%m/%Y")
-        elif low in ("metric", "metrica", "indicador") or (s.dtype == object and s.isin(METRIC_LABELS).any()):
+        elif low in ("metric", "metrica", "indicador") or (pd.api.types.is_string_dtype(s) and s.isin(METRIC_LABELS).any()):
             out[c] = s.map(lambda v: METRIC_LABELS.get(v, v))
         elif pd.api.types.is_bool_dtype(s):
             out[c] = s.map({True: "Sim", False: "Não"})
@@ -95,7 +97,7 @@ def pretty_df(df: pd.DataFrame) -> pd.DataFrame:
             out[c] = s.map(lambda v, nd=nd: fmt_num(v, nd))
         elif pd.api.types.is_integer_dtype(s):
             out[c] = s.astype(str) if low in _ID_COLS or low.startswith(("ano", "mes")) else s.map(lambda v: fmt_num(v, 0))
-        elif s.dtype == object and low in ("tendencia", "direction", "direcao"):
+        elif pd.api.types.is_string_dtype(s) and low in ("tendencia", "direction", "direcao"):
             out[c] = s.map(lambda v: _TEXT_MAP.get(str(v).lower(), v))
     out.columns = _dedupe([humanize(c) for c in out.columns])
     return out

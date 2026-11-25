@@ -65,13 +65,16 @@ def grain_for(days: int) -> str:
 
 
 # ------------------------------------------------------------------ séries e totais
-def series(metric: str, d0, d1, grain="month", by="entity", entity_ids=None) -> pd.DataFrame:
+def series(metric: str, d0, d1, grain="month", by="entity", entity_ids=None,
+           exclude_consolidated=False) -> pd.DataFrame:
     assert grain in _GRAINS
     col = {"entity": "e.name", "planta": "e.planta", "tipo": "e.tipo", "total": "'Total'"}[by]
     where, params = ["d.metric = ?", "d.ref_date BETWEEN ? AND ?"], [metric, d0, d1]
     if entity_ids:
         where.append("d.entity_id IN (" + ",".join("?" * len(entity_ids)) + ")")
         params += list(entity_ids)
+    if exclude_consolidated:
+        where.append(NOT_CONSOL)
     return _df(f"""SELECT date_trunc('{grain}', d.ref_date)::DATE AS periodo, {col} AS grupo,
                    {AGG} AS valor
                    FROM daily_metrics d JOIN entities e USING (entity_id)
@@ -196,12 +199,16 @@ def seguranca_totais(d0, d1, entity_ids=None) -> pd.DataFrame:
     return w.reset_index()
 
 
-def seguranca_anual_taxa() -> pd.DataFrame:
-    df = _df("""SELECT e.name AS area, EXTRACT(year FROM d.ref_date)::INT AS ano,
+def seguranca_anual_taxa(d0=None, d1=None) -> pd.DataFrame:
+    where, params = ["d.metric IN ('acidentes','horas_homem_trabalhadas')", NOT_CONSOL], []
+    if d0 is not None and d1 is not None:
+        where.append("d.ref_date BETWEEN ? AND ?")
+        params += [d0, d1]
+    df = _df(f"""SELECT e.name AS area, EXTRACT(year FROM d.ref_date)::INT AS ano,
                 SUM(d.value) FILTER (WHERE d.metric='acidentes') * 1e6 /
                 NULLIF(SUM(d.value) FILTER (WHERE d.metric='horas_homem_trabalhadas'), 0) AS taxa
                 FROM daily_metrics d JOIN entities e USING (entity_id)
-                WHERE d.metric IN ('acidentes','horas_homem_trabalhadas') GROUP BY 1, 2""")
+                WHERE {' AND '.join(where)} GROUP BY 1, 2""", params)
     return df
 
 
@@ -221,7 +228,7 @@ def dias_sem_acidente() -> pd.DataFrame:
                        (dmax - last).days if last is not None else 0])
         rows.append({"area": area, "ultimo_acidente": None if last is None else last.date(),
                      "dias_sem_acidente": (dmax - last).days if last is not None else (dmax - first).days,
-                     "maior_sequencia_dias": longest, "acidentes_total": int(hits.shape[0])})
+                     "maior_sequencia_dias": longest, "acidentes_total": int(g["value"].sum())})
     return pd.DataFrame(rows).sort_values("dias_sem_acidente")
 
 
@@ -365,3 +372,31 @@ def series_outliers(entity_id: str, metric: str, d0, d1) -> pd.DataFrame:
 def expected_series(entity_id: str, metric: str, d0, d1) -> pd.DataFrame:
     return _df("""SELECT ref_date, expected FROM v_outliers WHERE entity_id=? AND metric=?
                   AND ref_date BETWEEN ? AND ? ORDER BY 1""", [entity_id, metric, d0, d1])
+
+
+# ------------------------------------------------------------------ previsão
+def forecast(entity_id: str, metric: str) -> pd.DataFrame:
+    return _df("""SELECT ref_date, horizon_days, yhat, yhat_lower, yhat_upper, wape_pct, coverage_pct
+                  FROM v_forecasts WHERE entity_id=? AND metric=? ORDER BY ref_date""", [entity_id, metric])
+
+
+def forecast_overview(area=None, days=7, limit=15) -> pd.DataFrame:
+    """Séries cuja previsão média dos próximos `days` dias mais se afasta da média dos últimos `days` dias.
+    Só entram séries de contínuo com erro histórico (WAPE) <= 25%, para não destacar ruído."""
+    w, p = ["f.horizon_days <= ?", NOT_CONSOL, "c.tipo_dado = 'continuo'", "f.wape_pct <= 25"], [days]
+    if area:
+        w.append("c.area = ?")
+        p.append(area)
+    dmax = data_range()[1]
+    df = _df(f"""WITH prev AS (
+                   SELECT entity_id, metric, AVG(yhat) AS previsto, MAX(wape_pct) AS wape_pct
+                   FROM v_forecasts f JOIN entities e USING (entity_id) JOIN metrics_catalog c USING (metric)
+                   WHERE {' AND '.join(w)} GROUP BY 1, 2),
+                 hist AS (
+                   SELECT entity_id, metric, AVG(value) AS recente FROM daily_metrics
+                   WHERE ref_date > CAST(? AS DATE) - INTERVAL {int(days)} DAY GROUP BY 1, 2)
+                 SELECT e.name AS ativo, p.metric AS metrica, h.recente, p.previsto,
+                        (p.previsto - h.recente) / NULLIF(ABS(h.recente), 0) * 100 AS variacao_pct, p.wape_pct
+                 FROM prev p JOIN hist h USING (entity_id, metric) JOIN entities e USING (entity_id)
+                 ORDER BY ABS(variacao_pct) DESC NULLS LAST LIMIT {int(limit)}""", [*p, str(dmax.date())])
+    return df

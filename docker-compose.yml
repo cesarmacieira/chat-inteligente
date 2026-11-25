@@ -1,0 +1,14 @@
+services:
+  chat-inteligente:
+    build: .
+    ports: ["8501:8501"]
+    env_file: .env          # GROQ_API_KEY etc. (nunca vai para a imagem: está no .dockerignore)
+    environment:
+      AUTO_BOOTSTRAP: "1"
+      HISTORY_PATH: "/app/history/chat_history.sqlite"
+    volumes:
+      - warehouse:/app/data
+      - historico:/app/history
+volumes:
+  warehouse:
+  historico:

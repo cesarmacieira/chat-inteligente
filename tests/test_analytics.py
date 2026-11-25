@@ -7,7 +7,8 @@ def test_period_resolution():
     assert p["days"] == 30 and p["d1"] == "2026-11-09" and p["p0"] and p["p1"] < p["d0"]
     assert A.resolve_period("Todo o período")["p0"] is None
     assert A.resolve_period("Ano atual")["d0"] == "2026-01-01"
-    assert A.grain_for(30) == "day" and A.grain_for(365) == "week" or A.grain_for(365) == "week"
+    assert A.grain_for(30) == "day"
+    assert A.grain_for(365) == "week"
     assert A.grain_for(1800) == "month"
 
 
@@ -36,8 +37,10 @@ def test_producao_and_paradas():
 def test_safety_tables():
     d = A.dias_sem_acidente()
     assert (d["dias_sem_acidente"] >= 0).all() and len(d) == 10
-    t = A.seguranca_anual_taxa()
+    assert d["acidentes_total"].sum() == A.total("acidentes", "2021-01-01", "2026-11-09")
+    t = A.seguranca_anual_taxa("2026-01-01", "2026-11-09")
     assert t["taxa"].dropna().ge(0).all()
+    assert set(t["ano"]) == {2026} and not t["area"].str.contains("Consolidado").any()
     assert len(A.padrao_semanal("acidentes", "2021-01-01", "2026-11-09")) == 7
 
 

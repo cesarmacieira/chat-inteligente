@@ -27,16 +27,23 @@ CREATE TABLE IF NOT EXISTS ml_trends (
     run_id VARCHAR, entity_id VARCHAR, metric VARCHAR, window_days INTEGER,
     slope_per_day DOUBLE, pct_change DOUBLE, p_value DOUBLE,
     trend_direction VARCHAR, is_significant BOOLEAN);
+CREATE TABLE IF NOT EXISTS ml_forecasts (
+    run_id VARCHAR, entity_id VARCHAR, metric VARCHAR, ref_date DATE, horizon_days INTEGER,
+    yhat DOUBLE, yhat_lower DOUBLE, yhat_upper DOUBLE, wape_pct DOUBLE, coverage_pct DOUBLE);
 CREATE OR REPLACE VIEW v_outliers AS
     SELECT * FROM ml_outliers
     WHERE run_id = (SELECT run_id FROM ml_runs ORDER BY run_ts DESC LIMIT 1);
 CREATE OR REPLACE VIEW v_trends AS
     SELECT * FROM ml_trends
     WHERE run_id = (SELECT run_id FROM ml_runs ORDER BY run_ts DESC LIMIT 1);
+CREATE OR REPLACE VIEW v_forecasts AS
+    SELECT * FROM ml_forecasts
+    WHERE run_id = (SELECT run_id FROM ml_runs ORDER BY run_ts DESC LIMIT 1);
 """
 
 _DROP = """
-DROP VIEW IF EXISTS v_outliers; DROP VIEW IF EXISTS v_trends;
+DROP VIEW IF EXISTS v_outliers; DROP VIEW IF EXISTS v_trends; DROP VIEW IF EXISTS v_forecasts;
+DROP TABLE IF EXISTS ml_forecasts;
 DROP TABLE IF EXISTS ml_outliers; DROP TABLE IF EXISTS ml_trends; DROP TABLE IF EXISTS ml_runs;
 DROP TABLE IF EXISTS daily_metrics; DROP TABLE IF EXISTS metrics_catalog;
 DROP TABLE IF EXISTS entities; DROP TABLE IF EXISTS app_meta;

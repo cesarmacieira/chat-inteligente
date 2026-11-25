@@ -1,17 +1,23 @@
 """Página de chat para a diretoria: respostas em linguagem de negócio, tabelas formatadas, gráfico automático,
 pontos de atenção visíveis e registro permanente de cada pergunta/resposta/consulta."""
 import html
+import io
 import json
+import logging
+import re
 import time
 
 import pandas as pd
 import streamlit as st
 
-from chat_inteligente import config, history
+from chat_inteligente import briefing, config, history
 from chat_inteligente.context import fmt_num
 from chat_inteligente.labels import humanize, pretty_df
+from chat_inteligente.prompt_guard import inspect_question
+import charts
 
 AVATAR = ":material/auto_awesome:"
+logger = logging.getLogger(__name__)
 
 
 def display_df(df: pd.DataFrame) -> pd.DataFrame:
@@ -22,10 +28,19 @@ def display_df(df: pd.DataFrame) -> pd.DataFrame:
 def history_for_llm(msgs: list[dict], n_turns: int = 3) -> list[dict]:
     """Últimas perguntas + SQL gerado, para perguntas de acompanhamento."""
     out = []
-    pairs = [m for m in msgs if m["role"] == "user" or m.get("sql")]
+    pairs = []
+    for i, m in enumerate(msgs):
+        if m["role"] == "user":
+            nxt = msgs[i + 1] if i + 1 < len(msgs) and msgs[i + 1]["role"] == "assistant" else {}
+            if nxt.get("error") == "entrada_recusada" or inspect_question(m["text"]):
+                continue
+            pairs.append(m)
+        elif m.get("sql") and m.get("error") != "entrada_recusada":
+            pairs.append(m)
     for m in pairs[-2 * n_turns:]:
-        out.append({"role": "user", "content": m["text"]} if m["role"] == "user"
-                    else {"role": "assistant", "content": f"```sql\n{m['sql']}\n```"})
+        out.append({"role": "user", "content": f"<pergunta_anterior>\n{m['text']}\n</pergunta_anterior>"}
+                   if m["role"] == "user" else
+                   {"role": "assistant", "content": f"<sql_anterior>\n```sql\n{m['sql']}\n```\n</sql_anterior>"})
     return out
 
 
@@ -42,18 +57,24 @@ def chart_for(df: pd.DataFrame):
     """DataFrame pronto para gráfico (index = eixo X, colunas = séries) e o tipo ('line'|'bar'), ou None."""
     if df is None or len(df) < 3 or len(df) > 600:
         return None
+    band = charts.find_band(df)
+    if band:
+        return charts.band_chart(df, *band), "band"
     nums = [c for c in df.columns if pd.api.types.is_numeric_dtype(df[c]) and not pd.api.types.is_bool_dtype(df[c])
             and str(c).lower() not in ("ano", "year", "mes", "trimestre", "semana")]
     if not nums:
         return None
     time_cols = [c for c in df.columns if pd.api.types.is_datetime64_any_dtype(df[c])
                  or str(c).lower() in ("ano", "mes", "trimestre", "semana", "year")]
-    cats = [c for c in df.columns if df[c].dtype == object]
+    cats = [c for c in df.columns if pd.api.types.is_string_dtype(df[c])]
     nice = {c: humanize(c) for c in df.columns}
     if time_cols:
         x = time_cols[0]
         if cats and df[cats[0]].nunique() <= 8 and len(nums) >= 1:
-            wide = df.pivot_table(index=x, columns=cats[0], values=nums[0], aggfunc="sum").sort_index()
+            # Nunca agrega silenciosamente: soma distorce taxas/concentrações e média distorce totais.
+            if df.duplicated([x, cats[0]]).any():
+                return None
+            wide = df.pivot(index=x, columns=cats[0], values=nums[0]).sort_index()
             wide.index = wide.index.astype(str) if not pd.api.types.is_datetime64_any_dtype(wide.index) else wide.index
             return wide, "line"
         wide = df.set_index(x)[nums[:3]].sort_index().rename(columns=nice)
@@ -64,6 +85,75 @@ def chart_for(df: pd.DataFrame):
     return None
 
 
+_FORMULA_START = ("=", "+", "-", "@", "\t", "\r")
+
+
+def _safe_cell(v, *, header=False):
+    if not isinstance(v, str) or not v.startswith(_FORMULA_START):
+        return v
+    # Número negativo formatado pela própria aplicação não é fórmula; expressões como -2+3 continuam bloqueadas.
+    if not header and re.fullmatch(r"-\d{1,3}(?:\.\d{3})*(?:,\d+)?|-\d+(?:,\d+)?", v):
+        return v
+    return "'" + v
+
+
+def _defuse(df: pd.DataFrame) -> pd.DataFrame:
+    """Neutraliza fórmulas em valores e cabeçalhos antes de exportar para planilhas."""
+    out = df.copy()
+    out.columns = [_safe_cell(str(c), header=True) for c in out.columns]
+    for c in out.columns:
+        if not pd.api.types.is_numeric_dtype(out[c]) and not pd.api.types.is_datetime64_any_dtype(out[c]):
+            out[c] = out[c].map(_safe_cell)
+    return out
+
+
+def _xlsx(df: pd.DataFrame) -> bytes:
+    """Excel com tipos nativos; a apresentação pt-BR é aplicada como formato, não como texto."""
+    out = _defuse(df)
+    names, seen = [], {}
+    for c in out.columns:
+        name = humanize(c)
+        seen[name] = seen.get(name, 0) + 1
+        names.append(name if seen[name] == 1 else f"{name} ({seen[name]})")
+    out.columns = names
+    buf = io.BytesIO()
+    with pd.ExcelWriter(buf, engine="openpyxl") as w:
+        out.to_excel(w, index=False, sheet_name="Resultado")
+        ws = w.sheets["Resultado"]
+        for i, (col, original) in enumerate(zip(out.columns, df.columns), start=1):
+            s = df[original]
+            width = max([len(str(col))] + [len(str(v)) for v in s.head(200)]) + 2
+            ws.column_dimensions[ws.cell(row=1, column=i).column_letter].width = min(width, 60)
+            if pd.api.types.is_datetime64_any_dtype(s):
+                for cell in ws.iter_cols(min_col=i, max_col=i, min_row=2):
+                    for value in cell: value.number_format = "dd/mm/yyyy"
+            elif pd.api.types.is_integer_dtype(s):
+                for cell in ws.iter_cols(min_col=i, max_col=i, min_row=2):
+                    for value in cell: value.number_format = "#,##0"
+            elif pd.api.types.is_float_dtype(s):
+                for cell in ws.iter_cols(min_col=i, max_col=i, min_row=2):
+                    for value in cell: value.number_format = "#,##0.00"
+    return buf.getvalue()
+
+
+def followups(df: pd.DataFrame | None, sql: str | None) -> list[str]:
+    """Próximos passos sugeridos a partir do que a resposta mostrou (regras simples, sem custo de LLM)."""
+    low = (sql or "").lower()
+    if "v_forecasts" in low:
+        out = ["Essa previsão costuma acertar?", "Compare com os últimos 30 dias"]
+    elif "v_outliers" in low:
+        out = ["Qual a tendência dessas séries nos últimos 90 dias?", "Houve outros desvios nos últimos 30 dias?"]
+    elif "v_trends" in low:
+        out = ["Quais dessas séries tiveram valor fora do padrão recentemente?", "Qual a previsão dos próximos 7 dias para elas?"]
+    elif "producao_t" in low:
+        out = ["Qual a previsão para os próximos 7 dias?", "Compare com o mesmo mês do ano anterior"]
+    elif any(k in low for k in ("acidentes", "incidentes", "desvios", "ocorrencias")):
+        out = ["Mostre a evolução mensal", "Qual a taxa por milhão de horas-homem?"]
+    else:
+        out = ["Mostre a evolução mensal", "Quais pontos merecem atenção?"]
+    return out[:2] + ["Resuma em três pontos para a diretoria"]
+
+
 def _show_table(df: pd.DataFrame, key: str, secs: float | None = None) -> None:
     n = len(df)
     meta = f"{fmt_num(n, 0)} registro{'s' if n != 1 else ''}" + (f" · {secs:.1f} s" if secs else "")
@@ -71,9 +161,16 @@ def _show_table(df: pd.DataFrame, key: str, secs: float | None = None) -> None:
     ch = chart_for(df)
     if ch is not None:
         data, kind = ch
-        (st.line_chart if kind == "line" else st.bar_chart)(data, height=260)
+        if kind == "band":
+            st.altair_chart(data, width="stretch")
+        else:
+            (st.line_chart if kind == "line" else st.bar_chart)(data, height=260)
     st.dataframe(pretty_df(df), hide_index=True)
-    st.download_button("Baixar tabela (CSV)", pretty_df(df).to_csv(index=False, sep=";", decimal=",").encode("utf-8-sig"),
+    pretty = pretty_df(df)
+    c1, c2, _ = st.columns([1, 1, 3])
+    c1.download_button("Baixar Excel", _xlsx(df), file_name="resultado.xlsx", key=f"xl_{key}",
+                       mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
+    c2.download_button("Baixar CSV", _defuse(pretty).to_csv(index=False, sep=";", decimal=",").encode("utf-8-sig"),
                        file_name="resultado.csv", mime="text/csv", key=f"dl_{key}")
 
 
@@ -92,7 +189,14 @@ def technical_details(sql, attempts, secs, provider, model, error=None) -> None:
     st.caption(f"Modelo: {provider} · {model} · {secs or 0:.1f} s")
 
 
-def _assistant(m: dict, key: str) -> None:
+def _on_feedback(key: str, turn_id: int) -> None:
+    try:
+        history.set_feedback(turn_id, st.session_state.get(key))
+    except Exception:
+        logger.exception("Não foi possível gravar o feedback")
+
+
+def _assistant(m: dict, key: str, latest: bool = False) -> None:
     with st.chat_message("assistant", avatar=AVATAR):
         st.markdown(m["text"])
         if m.get("attention"):
@@ -101,10 +205,21 @@ def _assistant(m: dict, key: str) -> None:
                         unsafe_allow_html=True)
         if m.get("df") is not None and len(m["df"]):
             _show_table(m["df"], key, m.get("secs"))
+        if m.get("unverified"):
+            st.markdown('<div class="meta">⚠ Não consegui conferir na tabela: ' + html.escape(", ".join(m["unverified"][:6]))
+                        + ". Confirme esses números antes de usar.</div>", unsafe_allow_html=True)
+        if m.get("turn_id"):
+            fk = f"fb_{key}"
+            st.feedback("thumbs", key=fk, on_change=_on_feedback, args=(fk, m["turn_id"]))
         if config.SHOW_TECHNICAL and (m.get("sql") or m.get("error")):
             with st.expander("Como chegamos a esse resultado"):
                 technical_details(m.get("sql"), m.get("attempts"), m.get("secs"), m.get("provider", config.LLM_PROVIDER),
                                   m.get("model", ""), m.get("error"))
+        if latest and m.get("df") is not None and len(m["df"]):
+            st.caption("Continuar a análise")
+            cols = st.columns(3)
+            for i, q in enumerate(followups(m["df"], m.get("sql"))):
+                cols[i].button(q, key=f"follow_{key}_{i}", on_click=_set_pending, args=(q,), width="stretch")
 
 
 def load_conversation(conv_id: int) -> None:
@@ -115,8 +230,26 @@ def load_conversation(conv_id: int) -> None:
         msgs.append({"role": "user", "text": t["question"]})
         msgs.append({"role": "assistant", "text": t["answer"], "df": history.preview_df(t), "sql": t["sql_final"],
                      "attention": json.loads(t["attention"] or "[]"), "attempts": json.loads(t["attempts"] or "[]"),
-                     "secs": t["secs"], "provider": t["provider"], "model": t["model"], "error": t["error"]})
-    ss.msgs, ss.conv_id, ss.view, ss.nq = msgs, conv_id, "chat", 0
+                     "secs": t["secs"], "provider": t["provider"], "model": t["model"], "error": t["error"],
+                     "turn_id": t["id"], "unverified": json.loads(t.get("unverified") or "[]")})
+    ss.msgs, ss.conv_id, ss.view = msgs, conv_id, "chat"
+
+
+@st.cache_data(ttl=600, show_spinner=False)
+def _briefing_cached(run_ts: str) -> dict:
+    return briefing.build()
+
+
+def _briefing(info: dict) -> None:
+    if not info.get("has_run"):
+        return
+    b = _briefing_cached(str(info.get("run_ts")))
+    if not b["items"]:
+        return
+    rows = "".join(f'<li><span class="tag tag-{k}">{html.escape(briefing.TAGS[k])}</span> {html.escape(t)}</li>'
+                   for k, t in b["items"])
+    st.markdown(f'<div class="briefing"><div class="briefing-title">Resumo do dia · dados até {b["date"]}</div>'
+                f"<ul>{rows}</ul></div>", unsafe_allow_html=True)
 
 
 def render(info: dict, cat: dict) -> None:
@@ -127,25 +260,22 @@ def render(info: dict, cat: dict) -> None:
 
     typed = st.chat_input("Pergunte sobre produção, segurança ou meio ambiente...")
     question = typed or ss.pop("pending", None)
-    if question and config.MAX_QUESTIONS and ss.get("nq", 0) >= config.MAX_QUESTIONS:
-        st.warning(f"Limite de {config.MAX_QUESTIONS} perguntas por sessão atingido. Use «Nova conversa» ou recarregue a página.")
-        question = None
-
     if not ss.msgs and not question:
         st.markdown('<div class="welcome"><div class="welcome-mark">✦</div><h1>Como posso ajudar?</h1>'
                     '<p>Pergunte em português sobre produção, segurança e meio ambiente. '
                     'Eu busco os dados, resumo o resultado e destaco o que merece atenção.</p></div>',
                     unsafe_allow_html=True)
+        _briefing(info)
         with st.container(key="suggestions"):
             cols = st.columns(2)
             for i, q in enumerate(cat.get("suggestions", [])[:8]):
                 cols[i % 2].button(q, key=f"sug{i}", on_click=_set_pending, args=(q,), width="stretch")
+    last_assistant = max((i for i, m in enumerate(ss.msgs) if m["role"] == "assistant"), default=-1)
     for i, m in enumerate(ss.msgs):
-        _user(m["text"]) if m["role"] == "user" else _assistant(m, str(i))
+        _user(m["text"]) if m["role"] == "user" else _assistant(m, str(i), i == last_assistant)
     if not question:
         return
 
-    ss.nq = ss.get("nq", 0) + 1
     hist = history_for_llm(ss.msgs)
     ss.msgs.append({"role": "user", "text": question})
     _user(question)
@@ -157,6 +287,7 @@ def render(info: dict, cat: dict) -> None:
                 a = ss.agent.ask(question, hist)
                 msg = {"role": "assistant", "text": a.text, "df": a.df, "sql": a.sql, "context": a.context,
                        "attention": a.attention, "attempts": a.attempts, "secs": time.time() - t0, "error": a.error,
+                       "unverified": a.unverified,
                        "provider": config.LLM_PROVIDER, "model": model}
                 status = "erro" if a.error else "ok"
             except Exception as e:  # falha de rede, limite do provedor etc.
@@ -167,10 +298,11 @@ def render(info: dict, cat: dict) -> None:
     try:  # o registro nunca pode derrubar o chat
         if ss.get("conv_id") is None:
             ss.conv_id = history.new_conversation(question)
-        history.log_turn(ss.conv_id, question, msg["text"], status, sql_final=msg.get("sql"), attempts=msg["attempts"],
+        msg["turn_id"] = history.log_turn(ss.conv_id, question, msg["text"], status, sql_final=msg.get("sql"), attempts=msg["attempts"],
                          df=msg["df"], attention=msg["attention"], context=msg["context"],
-                         provider=config.LLM_PROVIDER, model=model, secs=msg["secs"], error=msg["error"])
+                         provider=config.LLM_PROVIDER, model=model, secs=msg["secs"], error=msg["error"],
+                         unverified=msg.get("unverified"))
     except Exception:
-        pass
+        logger.exception("Não foi possível registrar a conversa no histórico")
     ss.msgs.append(msg)
     st.rerun()

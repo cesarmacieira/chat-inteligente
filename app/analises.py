@@ -5,6 +5,7 @@ import streamlit as st
 
 from chat_inteligente import analytics as A
 from chat_inteligente.labels import pretty_df, rotulo
+import charts
 
 _PROD_TIPOS = ["alto_forno", "laminador", "galvanizacao"]
 _NIVEIS = {"Planta": "planta", "Ativo": "entity", "Total": "total"}
@@ -142,13 +143,12 @@ def seguranca(info):
     st.subheader("Evolução")
     m = st.selectbox("Indicador", A.SEG_METRICS, index=3, key="seg_m", format_func=rotulo)
     grain = "month" if per["days"] > 100 else "week"
-    ser = A.series(m, d0, d1, grain, "entity")
-    st.bar_chart(_wide(ser[~ser["grupo"].str.contains("Consolidado")]))
+    ser = A.series(m, d0, d1, grain, "entity", exclude_consolidated=True)
+    st.bar_chart(_wide(ser))
     l, r = st.columns(2)
     with l:
         st.subheader("Taxa anual de acidentes por milhão de HH")
-        ta = A.seguranca_anual_taxa()
-        ta = ta[~ta["area"].str.contains("Consolidado")]
+        ta = A.seguranca_anual_taxa(d0, d1)
         st.line_chart(ta.pivot(index="ano", columns="area", values="taxa"))
     with r:
         st.subheader("Dias sem acidente")
@@ -269,10 +269,17 @@ def detalhe(info):
     m = c2.selectbox("Indicador", ok, key="det_met", format_func=rotulo)
     per = c3.selectbox("Período", A.PERIODOS, index=2, key="det_per")
     p = A.resolve_period(per)
-    d = A.daily(eid, m, p["d0"], p["d1"]).set_index("ref_date")["value"].rename("Observado")
-    ex = A.expected_series(eid, m, p["d0"], p["d1"]).set_index("ref_date")["expected"].rename("Esperado")
-    st.line_chart(pd.concat([d, ex], axis=1))
+    obs = A.daily(eid, m, p["d0"], p["d1"])
+    d = obs.set_index("ref_date")["value"]
+    exp = A.expected_series(eid, m, p["d0"], p["d1"])
+    outs = A.series_outliers(eid, m, p["d0"], p["d1"])
     mi = A.metric_info(m)
+    fc = A.forecast(eid, m)
+    show_fc = st.toggle("Mostrar previsão dos próximos 14 dias", value=not fc.empty, key="det_fc", disabled=fc.empty)
+    st.altair_chart(charts.series_chart(
+        obs, exp, outs.rename(columns={"data": "ref_date", "observado": "value"})[["ref_date", "value"]] if not outs.empty else None,
+        fc if show_fc else None, unit=mi["unidade"], limits=(mi["limite_inferior"], mi["limite_superior"])),
+        width="stretch")
     st.caption(f"{mi['descricao']} · unidade: {mi['unidade']} · agregação: {mi['agregacao']}. "
                "A linha 'esperado' é a base do modelo de outlier (mediana do mesmo dia da semana).")
     l, r = st.columns(2)
@@ -286,3 +293,40 @@ def detalhe(info):
     if len(d):
         st.subheader("Estatísticas")
         _table(d.describe().round(3).to_frame().T)
+
+
+# ----------------------------------------------------------------------- previsão
+def previsao(info):
+    st.caption("Previsão dos próximos 14 dias com faixa provável de 80%. O erro histórico (WAPE) vem de um teste: "
+               "o modelo prevê os últimos 14 dias sem vê-los e é comparado ao que aconteceu.")
+    area_lbl = st.selectbox("Área", ["Todas"] + list(A.AREAS.values()), key="fc_area")
+    area = {v: k for k, v in A.AREAS.items()}.get(area_lbl)
+    st.subheader("O que deve mudar nos próximos 7 dias")
+    ov = A.forecast_overview(area=area, days=7, limit=10)
+    if ov.empty:
+        st.info("Sem séries com previsão confiável (erro histórico até 25%) para esse filtro.")
+    else:
+        _table(ov.rename(columns={"recente": "média dos últimos 7 dias", "previsto": "previsão média dos próximos 7 dias",
+                                  "wape_pct": "wape_pct"}).round(2))
+    st.subheader("Previsão de uma série")
+    ents = A._df("""SELECT DISTINCT e.entity_id, e.name FROM v_forecasts f JOIN entities e USING (entity_id)
+                    JOIN metrics_catalog c USING (metric) WHERE (? IS NULL OR c.area = ?) ORDER BY e.name""", [area, area])
+    if ents.empty:
+        return
+    c1, c2 = st.columns(2)
+    nome = c1.selectbox("Ativo", ents["name"].tolist(), key="fc_ent")
+    eid = ents.loc[ents["name"] == nome, "entity_id"].iloc[0]
+    mets = A._df("SELECT DISTINCT metric FROM v_forecasts WHERE entity_id = ?", [eid])["metric"].tolist()
+    m = c2.selectbox("Indicador", mets, key="fc_met", format_func=rotulo)
+    fc = A.forecast(eid, m)
+    mi = A.metric_info(m)
+    hist = A.daily(eid, m, str((A.data_range()[1] - pd.Timedelta(days=90)).date()), str(A.data_range()[1].date()))
+    st.altair_chart(charts.series_chart(hist, None, None, fc, unit=mi["unidade"],
+                                        limits=(mi["limite_inferior"], mi["limite_superior"])), width="stretch")
+    k1, k2 = st.columns(2)
+    wape, cov = fc["wape_pct"].iloc[0], fc["coverage_pct"].iloc[0]
+    k1.metric("Erro histórico (WAPE)", "—" if pd.isna(wape) else f"{_fmt(wape, 1)}%",
+              help="Quanto a previsão errou, em média, nos últimos 14 dias de teste. Menor é melhor.")
+    k2.metric("Acerto da faixa de 80%", "—" if pd.isna(cov) else f"{_fmt(cov, 0)}%",
+              help="Em quantos dos 14 dias de teste o valor real ficou dentro da faixa prevista.")
+    _table(fc[["ref_date", "yhat", "yhat_lower", "yhat_upper"]])

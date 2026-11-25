@@ -1,4 +1,4 @@
-import hmac
+import logging
 import sys
 from pathlib import Path
 
@@ -15,28 +15,12 @@ import history_view
 import pages_extra
 import theme
 
+logger = logging.getLogger(__name__)
+
 st.set_page_config(page_title="Chat inteligente", page_icon="✦", layout="wide", initial_sidebar_state="auto")
 theme.apply()
 
-if config.APP_PASSWORD and not st.session_state.get("auth"):
-    theme.login_css()
-    st.markdown('<div class="login-hero"><div class="welcome-mark">✦</div><h1>Chat inteligente</h1>'
-                '<p>Produção, segurança e meio ambiente em linguagem simples.<br>Acesso restrito: informe a senha para entrar.</p></div>',
-                unsafe_allow_html=True)
-    with st.form("login", border=False):
-        pwd = st.text_input("Senha de acesso", type="password", key="pwd", placeholder="Digite a senha")
-        entrar = st.form_submit_button("Entrar", type="primary", width="stretch")
-    if entrar or pwd:
-        if hmac.compare_digest(pwd.encode(), config.APP_PASSWORD.encode()):
-            st.session_state.auth = True
-            st.rerun()
-        elif entrar:
-            st.error("Senha incorreta. Tente novamente.")
-    st.markdown('<div class="login-foot">Dados fictícios de demonstração · acesso monitorado</div>', unsafe_allow_html=True)
-    st.stop()
-
-
-@st.cache_resource(show_spinner="Preparando os dados (primeira execução)...")
+@st.cache_resource(ttl=6 * 3600, show_spinner="Preparando os dados (primeira execução)...")
 def _prepare() -> bool:
     return bootstrap.ensure_data()
 
@@ -64,7 +48,6 @@ def _go(view: str) -> None:
 def _new_chat() -> None:
     ss.msgs = []
     ss.conv_id = None
-    ss.nq = 0
     ss.view = "chat"
 
 
@@ -79,6 +62,7 @@ with st.sidebar:
     try:
         recents = history.recent_conversations(6)
     except Exception:
+        logger.exception("Não foi possível carregar as conversas recentes")
         recents = []
     if recents:
         st.markdown('<div class="side-label">Conversas recentes</div>', unsafe_allow_html=True)
@@ -127,8 +111,8 @@ else:
         if not (info["ok"] and info["has_run"]):
             st.info("Gere os dados e rode os modelos para ver as análises.")
         else:
-            s1, s2, s3, s4, s5, s6 = st.tabs(["Visão executiva", "Produção", "Segurança", "Meio ambiente",
-                                             "Anomalias e tendências (ML)", "Série em detalhe"])
+            s1, s2, s3, s4, s5, s7, s6 = st.tabs(["Visão executiva", "Produção", "Segurança", "Meio ambiente",
+                                                  "Anomalias e tendências (ML)", "Previsão", "Série em detalhe"])
             with s1:
                 analises.executiva(info)
             with s2:
@@ -139,6 +123,8 @@ else:
                 analises.ambiente(info)
             with s5:
                 analises.modelos(info)
+            with s7:
+                analises.previsao(info)
             with s6:
                 analises.detalhe(info)
     elif ss.view == "historico":

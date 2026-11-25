@@ -1,0 +1,32 @@
+# Perguntas de avaliação: `q` é escrita de outro jeito que a do exemplo `ref` do catálogo.
+# O SQL do exemplo `ref` é a resposta de referência; o resultado do LLM é comparado com o dele.
+# Atenção: o prompt escolhe exemplos parecidos com a pergunta, então isto mede também o quanto o exemplo "vaza".
+# Para um teste mais duro, acrescente perguntas SEM exemplo equivalente e o SQL de referência em `sql:`.
+- q: Quanto produziu cada alto-forno em 5 de novembro de 2026?
+  ref: Qual foi a produção de cada alto-forno no dia 05/11/2026?
+- q: Alguma série está em queda nos últimos três meses?
+  ref: Quais métricas têm tendência de queda nos últimos 90 dias?
+- q: Produção de gusa por ano em cada alto-forno
+  ref: Qual a produção anual de gusa por alto-forno?
+- q: Acidentes por setor em 2025
+  ref: Quantos acidentes houve por área em 2025?
+- q: Quais setores tiveram mais incidentes em 2026?
+  ref: Qual área teve mais incidentes em 2026?
+- q: Indicadores ambientais acima do limite nos últimos 90 dias
+  ref: Quais indicadores ambientais ficaram fora do limite nos últimos 90 dias?
+- q: Últimos desvios fora do padrão em segurança
+  ref: Quais foram os outliers de segurança mais recentes?
+- q: Taxa de acidentes por milhão de HH em cada ano
+  ref: Qual a taxa de acidentes por milhão de horas-homem por ano?
+- q: Rendimento metálico do laminador, trimestre a trimestre
+  ref: Como evoluiu o rendimento metálico do laminador por trimestre?
+- q: Quantos dias o AF1 ficou parado?
+  ref: Quantos dias o Alto-Forno 1 ficou parado ou com produção muito baixa?
+- q: Consumo mensal de zinco da galvanização 2 em 2026
+  ref: Como foi o consumo de zinco da Galvanização 2 por mês em 2026?
+- q: A galvanização teve produção fora do padrão em 19/09/2026?
+  ref: A produção da galvanização no dia 19/09/2026 foi um outlier?
+- q: Previsão do AF1 para a próxima semana
+  ref: Qual a previsão de produção do Alto-Forno 1 para os próximos 7 dias?
+- q: Séries com valor fora do padrão recente e que também têm tendência
+  ref: Quais séries tiveram outlier nos últimos 90 dias e têm tendência de alta ou queda?

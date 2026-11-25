@@ -9,5 +9,6 @@ def warehouse():
     # não usa o tmp_path do pytest (a pasta pytest-of-<user> pode estar sem permissão)
     config.DB_PATH = Path(tempfile.mkdtemp(prefix="chat_inteligente_")) / "t.duckdb"
     config.HISTORY_PATH = config.DB_PATH.parent / "hist.sqlite"
+    config.AUTO_BOOTSTRAP = False      # os testes usam a data fixa; o bootstrap é testado com monkeypatch
     synth.generate(end="2026-11-09")   # data fixa: testes determinísticos
     run_daily.main()

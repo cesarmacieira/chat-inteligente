@@ -1,11 +1,14 @@
 """Contexto extra para as respostas: o que as métricas citadas na consulta significam
 (unidade, limites) e o que os modelos de ML dizem sobre elas (tendências e outliers recentes).
 """
+import logging
 import re
 
 import pandas as pd
 
 from .db import connect
+
+logger = logging.getLogger(__name__)
 
 _NOT_CONSOL = "e.tipo NOT LIKE 'consolidado_seguranca'"
 
@@ -33,7 +36,7 @@ def entity_names_in(df, known) -> list[str]:
         return []
     vals = set()
     for c in df.columns:
-        if df[c].dtype == object:
+        if pd.api.types.is_string_dtype(df[c]):
             vals |= set(df[c].dropna().astype(str).head(200))
     return [n for n in known if n in vals]
 
@@ -46,6 +49,7 @@ def build(sql: str, df=None, friendly: bool = False) -> list[str]:
     try:
         con = connect(read_only=True)
     except Exception:
+        logger.exception("Não foi possível abrir o banco para montar o contexto")
         return []
     try:
         cat = con.execute("SELECT * FROM metrics_catalog").df()
@@ -95,6 +99,7 @@ def build(sql: str, df=None, friendly: bool = False) -> list[str]:
                 lines.append(f"Sem outliers de {m} nos últimos 30 dias" + (" nesses ativos." if names else "."))
         return lines
     except Exception:
+        logger.exception("Não foi possível montar o contexto da resposta")
         return []
     finally:
         con.close()

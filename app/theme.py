@@ -66,6 +66,16 @@ div[data-testid="stElementContainer"]:has(.app-header){position:sticky;top:0;z-i
 .st-key-suggestions .stButton button>div{justify-content:flex-start;text-align:left;width:100%}
 .st-key-suggestions .stButton button:hover{border-color:var(--accent);background:var(--accent-soft)}
 
+/* ---------- resumo do dia ---------- */
+.briefing{border:1px solid var(--line);border-radius:16px;background:#fff;padding:14px 18px;margin:18px 0 6px;
+  box-shadow:0 1px 2px rgba(16,24,40,.03)}
+.briefing-title{font-weight:700;font-size:.92rem;margin-bottom:6px}
+.briefing ul{list-style:none;margin:0;padding:0;font-size:.86rem;line-height:1.5}
+.briefing li{padding:5px 0;border-top:1px solid #f0f1f3}.briefing li:first-child{border-top:0}
+.tag{display:inline-block;font-size:.68rem;font-weight:650;padding:2px 8px;border-radius:999px;margin-right:6px;
+  background:var(--bubble);color:var(--muted)}
+.tag-outlier{background:#fdecec;color:#a23232}.tag-limite{background:#fff4d9;color:#8a6a2f}
+.tag-tendencia{background:var(--accent-soft);color:var(--accent-dark)}.tag-previsao{background:#e9f6ef;color:#2a7a52}
 /* ---------- mensagens ---------- */
 .user-row{width:100%;display:flex;justify-content:flex-end;margin:18px 0 8px}
 .user-bubble{width:fit-content;max-width:78%;padding:10px 16px;background:var(--bubble);border-radius:20px;
@@ -112,25 +122,4 @@ def header(title_html: str, pill: str = "") -> None:
 def view_title(title: str, subtitle: str = "") -> None:
     st.markdown(f'<div class="view-title">{title}</div><p class="view-sub">{subtitle}</p>', unsafe_allow_html=True)
 
-
-LOGIN_CSS = """
-<style>
-section[data-testid="stSidebar"],[data-testid="stSidebarCollapsedControl"],[data-testid="stExpandSidebarButton"]{display:none!important}
-html,body,[data-testid="stApp"],[data-testid="stAppViewContainer"]{
-  background:radial-gradient(900px 500px at 50% -10%,#e8f0f7 0%,#fff 62%)!important}
-.block-container{max-width:420px!important;padding-top:11vh!important}
-.login-hero{display:flex;flex-direction:column;align-items:center;text-align:center;margin-bottom:18px}
-.login-hero h1{font-size:1.7rem;margin:16px 0 6px;letter-spacing:-.03em}
-.login-hero p{color:var(--muted);margin:0;font-size:.92rem;line-height:1.55}
-[data-testid="stForm"]{background:#fff;border:1px solid var(--line)!important;border-radius:18px;padding:22px 22px 18px;
-  box-shadow:0 14px 40px rgba(16,24,40,.08)}
-[data-testid="stForm"] input{border-radius:12px}
-[data-testid="stForm"] .stButton button{border-radius:12px;font-weight:650;background:var(--accent);border-color:var(--accent);height:2.7rem}
-[data-testid="stForm"] .stButton button:hover{background:var(--accent-dark);border-color:var(--accent-dark)}
-.login-foot{text-align:center;font-size:.74rem;color:var(--muted);margin-top:16px}
-</style>
-"""
-
-
-def login_css() -> None:
-    st.markdown(LOGIN_CSS, unsafe_allow_html=True)
+__all__ = ["apply", "header", "view_title"]

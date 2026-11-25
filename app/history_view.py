@@ -18,7 +18,8 @@ def render() -> None:
     flat = pd.DataFrame([{"Data/hora": t["ts"], "Conversa": t["title"], "Pergunta": t["question"],
                           "Resposta": t["answer"], "Registros": t["rows"], "Situação": "Concluída" if t["status"] == "ok" else "Com erro",
                           "Consulta executada": t["sql_final"], "Modelo": f"{t['provider']} · {t['model']}",
-                          "Tempo (s)": t["secs"]} for t in turns])
+                          "Tempo (s)": t["secs"],
+                          "Avaliação": {1: "Útil", 0: "Não ajudou"}.get(t.get("feedback"), "")} for t in turns])
     st.download_button("Baixar histórico completo (CSV)", flat.to_csv(index=False, sep=";", decimal=",").encode("utf-8-sig"),
                        file_name="historico_chat.csv", mime="text/csv", key="hist_dl")
     st.caption(f"{len(turns)} registro(s), do mais recente para o mais antigo.")
@@ -27,6 +28,8 @@ def render() -> None:
         with st.expander(f"{t['ts'].replace('T', ' ')} · {t['question'][:90]}{mark}"):
             st.markdown(f"**Pergunta**\n\n{t['question']}")
             st.markdown(f"**Resposta**\n\n{t['answer']}")
+            if t.get("feedback") is not None:
+                st.caption("Avaliação do usuário: " + ("útil" if t["feedback"] == 1 else "não ajudou"))
             att = json.loads(t["attention"] or "[]")
             if att:
                 st.markdown("**Pontos de atenção**\n\n" + "\n".join(f"- {a}" for a in att))

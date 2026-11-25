@@ -22,6 +22,8 @@ def status() -> dict:
                    MIN(ref_date) AS date_min, MAX(ref_date) AS date_max
                    FROM daily_metrics""").iloc[0]
         run = _df("SELECT * FROM ml_runs ORDER BY run_ts DESC LIMIT 1")
+        has_forecast_schema = int(_df("""SELECT COUNT(*) AS n FROM information_schema.tables
+            WHERE table_name IN ('ml_forecasts', 'v_forecasts')""")["n"].iloc[0]) == 2
     except Exception as e:
         return {"ok": False, "reason": str(e)}
     if int(b["n_entities"]) == 0:
@@ -34,9 +36,11 @@ def status() -> dict:
     st = {"ok": True, "source": source, "n_entities": int(b["n_entities"]),
           "n_series": int(b["n_series"]), "n_rows": int(b["n_rows"]),
           "date_min": str(b["date_min"])[:10], "date_max": str(b["date_max"])[:10],
-          "has_run": len(run) > 0}
+          "has_run": len(run) > 0, "has_forecasts": False}
     if st["has_run"]:
         r = run.iloc[0]
+        if has_forecast_schema:
+            st["has_forecasts"] = int(_df("SELECT COUNT(*) AS n FROM v_forecasts")["n"].iloc[0]) > 0
         st.update(run_ts=str(r["run_ts"])[:16], model_version=r["model_version"],
                   stale=str(r["data_max_date"])[:10] < st["date_max"])
     return st
@@ -49,6 +53,7 @@ TABLES = {
     "metrics_catalog": "Catálogo de métricas: área, unidade, agregação, limites e referências.",
     "v_outliers": "Resultado do modelo de outlier (última execução).",
     "v_trends": "Resultado do modelo de tendência (última execução).",
+    "v_forecasts": "Previsão dos próximos 14 dias por série, com faixa provável e erro histórico (última execução).",
     "ml_runs": "Histórico das execuções dos modelos.",
 }
 _MAX_ROWS = 50_000
